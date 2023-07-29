@@ -1,0 +1,103 @@
+(**
+  O'Donnell's scan implementation of carry lookahead adder.
+*)
+
+Require Import List.
+Require Import natbool. (* natlist2nat *)
+Require Import natlist. (* drop *)
+Require Import tacdef.  (* listRec *)
+
+Definition wval := natlist2nat.
+
+Section Foldr.
+
+Variable A B : Set.
+Variable g : B -> A -> A.
+
+Implicit Arguments fold_right [A B].
+Definition foldr := fold_right.
+Implicit Arguments foldr [A B].
+
+Implicit Types xs  : list B.
+Implicit Types c : A.
+Implicit Types x : B.
+
+Lemma foldr_nil : forall c, foldr g c nil = c.
+Proof. auto. Qed.
+
+Lemma foldr_cons : forall c x xs, 
+  foldr g c (x::xs) = g x (foldr g c xs).
+Proof. auto. Qed.
+
+Hint Rewrite foldr_nil foldr_cons : base_foldr.
+
+(** list comprehension over all index of a list [0..length l-1]. *)
+Fixpoint iter_list_aux 
+  (f : nat -> A) (l : list A) (i : nat) {struct l} : list A :=
+  match l with
+    hd::tl => (f i)::(iter_list_aux f tl (S i))
+    | nil => nil
+  end.
+
+Definition iter_list  (f : nat -> A) (l : list A) :=
+  iter_list_aux f l 0.
+
+(* scanr g c xs = [foldr g c (drop (i+1) xs) | i <- [0..length zs - 1]] *)
+Definition scanr g c (xs : list A) :=
+  iter_list (fun i => foldr g c (drop A (S i) xs)) xs.
+
+(* test
+Variables z3 z2 z1 z0 c : A.
+Definition zs := z3::z2::z1::z0::nil.
+
+Eval compute in (foldr g c zs).
+Eval compute in (scanr g c zs).
+*)
+
+End Foldr.
+
+
+Section AdderPrimitive.
+
+Definition A := nat.
+
+Variable c0 : A.
+
+Fixpoint mod2 (n : nat) : nat :=
+  match n with
+  | 0 => 0
+  | 1 => 1
+  | S (S i) => mod2 i
+  end.
+
+Definition bsum (xy : A * A) (c : A) : A := 
+  let (x,y) := xy in mod2 (x + y + c).
+
+Definition bcarry (xy : A * A) (c : A) : A := 
+  let (x,y) := xy in div2 (x + y + c).
+
+(* carry [(x(i-1),y(i-1));..;(x0,y0)] = ci *)
+Fixpoint carry (zs : list (A * A)) : A :=
+  match zs with
+    nil => 0
+    | zi::tl => bcarry zi (carry tl)
+  end.
+
+Lemma carry_foldr : forall (zs : list (A * A)),
+  carry zs = foldr A (A*A) bcarry 0 zs.
+Proof. listRec zs. Qed.
+
+(* carry [(x(i-1),y(i-1));..;(x0,y0)] = ci *)
+Fixpoint carry_i (zs : list (A * A)) (i:nat) {struct i} : A :=
+  match i with
+    0 => c0
+    | (S i') => bcarry (nth i' zs (c0,c0)) (carry_i zs i')
+  end.
+
+Implicit Arguments drop [A].
+Lemma carry_i_foldr : forall (zs : list (A * A)) (i:nat),
+  let n := length zs in
+    carry_i zs i = foldr A (A*A) bcarry c0 (drop (n-(S i)) zs).
+Proof. listRec zs. Qed.
+
+End AdderPrimitive.
