@@ -1,4 +1,4 @@
-Require Import String.
+(* Require Import String. *)
 Require Import Arith.
 Require Import listext.
 Require Import String.
@@ -21,7 +21,7 @@ Inductive Signal : Set :=
   | Nand2 : Signal -> Signal -> Signal
   | Nor2  : Signal -> Signal -> Signal
   | Not1  : Signal -> Signal
-  | Letb  : string -> Signal -> Signal -> Signal
+  | Letb  : string -> Signal -> Signal -> Signal  (* 去掉了一个Signal *)
 with Signal_Pair : Set :=
   | Spair : Signal -> Signal -> Signal_Pair
   | Letb2 : string -> Signal -> Signal_Pair -> Signal_Pair.
@@ -29,12 +29,12 @@ with Signal_Pair : Set :=
 Definition Signal2 := (Signal * Signal)%type.
 Definition nandb a b := negb (andb a b).
 Definition norb a b := negb (orb a b).
-Definition bool_to_nat (b : bool) :=
+Definition b2n (b : bool) :=
   match b with
   | true => 1
   | false => 0
   end.
-Coercion bool_to_nat : bool >-> nat.
+Coercion b2n : bool >-> nat.
 
 Fixpoint signal2bool (s:Signal) (env : string -> bool) {struct s} : bool :=
  let s2b s := signal2bool s env in
@@ -48,16 +48,19 @@ Fixpoint signal2bool (s:Signal) (env : string -> bool) {struct s} : bool :=
    | Nand2 r1 r2 => nandb (s2b r1) (s2b r2)
    | Nor2  r1 r2 => negb (orb  (s2b r1) (s2b r2))
    | Bitv v => env v
+(*    | Letb v r => 
+      let v1 := s2b r in *)
+      
    | Letb v e1 e2 => 
        let v1 := s2b e1 in
        let env1 x := if eqb x v then v1 else env x in
           signal2bool e2 env1
  end.
+
 Definition signal2_to_bool (sc:Signal2) (env:string->bool) : bool*bool :=
   let (sum,cout) := sc in
     (signal2bool sum env, signal2bool cout env).
 Definition s2b s := signal2bool s (fun x => true).
-Compute s2b (Not1 Bit1).
 Definition b2s (b:bool) : Signal :=
   match b with
    | true  => Bit1
@@ -101,6 +104,9 @@ Infix "!&" := nandb  (at level 40, left associativity)  : bool_scope.
 
 Definition half_adder_s (a b : Signal) : Signal2 := 
  pair (a (+) b) (a && b).
+Compute half_adder_s (Bitv "a") (Bitv "b").
+(* adder -> Signal  直接Compute *)
+(* (Bitv "a" (+) Bitv "b", Bitv "a" && Bitv "b") *)
 
 Definition full_adder_s (a b cin : Signal) : Signal2 :=
   let (s1,c1) := half_adder_s a b in
@@ -128,6 +134,10 @@ Definition bpairs2spairs (pl:tpPairList_b) : tpPairList_s :=
 (* list Signal => list bool *)
 Definition slist2blist (slist:tpList_s) : tpList_b :=
   List.map s2b slist.
+(* list bool => list Signal *)
+Definition blist2slist (blist:tpList_b) : tpList_s :=
+  List.map b2s blist.
+Compute blist2slist [true;false].
 (* signal level adder => boolean level adder *)
 Definition adder_s2b (f:tpRcAdder_s) : tpRcAdder_b :=
   fun (ab:tpPairList_b) (c:bool) =>
@@ -135,7 +145,7 @@ Definition adder_s2b (f:tpRcAdder_s) : tpRcAdder_b :=
     let sums := fst sc in
     let carry := snd sc in
        (slist2blist sums, s2b carry).
-
+(* bool层面的只定义了rc_adder, full_adder和half_adder没有定义 *)
 Definition rc_adder_b : tpRcAdder_b := adder_s2b rc_adder_s.
 
 
@@ -144,7 +154,6 @@ Definition rc_adder_b : tpRcAdder_b := adder_s2b rc_adder_s.
 
 (* ================================================================================= *)
 (** ** simulation tools  *)
-
 (* RTL-to-netlist *)
 Fixpoint signal2str (s:Signal) {struct s} : string :=
  let s2s s := signal2str s in
@@ -209,12 +218,14 @@ Fixpoint splist2bplist (a : tpPairList_s) : tpPairList_b :=
   | a1::al => sp2bp a1 :: splist2bplist al
   end.
 
-Definition simulate_rc_adder (f:tpRcAdder_s) (ab:tpPairList_b) (c:bool) : tpSumCarry_b :=
+Definition simulate (f:tpRcAdder_s) (ab:tpPairList_b) (c:bool) : tpSumCarry_b :=
   let (x,y) := f (bplist2splist ab) (b2s c) in
   (slist2blist x,s2b y).
-Compute simulate_rc_adder rc_adder_s [(true,false);(false,true)] true.
-
-
+(* 测试：1101+0110，初始进位为0 *)
+Compute simulate rc_adder_s 
+  [(true,false);(true,true);(false,true);(true,false)] false.
+(* 测试结果：([false; false; true; true], true) *) 
+(* 测试结果表示：sum=0011，carry=1 *)
 
 
 
@@ -255,18 +266,23 @@ Proof.
 Qed.
 
 (* behavior level formal verification. *)
-Definition ck_full_adder_ok
- (full_adder : full_adder_tp) : Prop :=
+Definition ck_full_adder_s_ok
+ (full_adder : tpFullAdder_s) : Prop :=
  forall a b cin : bool,
-   let (sum,cout) := full_adder a b cin in 
+   let '(a',b',cin') := (b2s a, b2s b, b2s cin)  in
+   let (sum,cout)    := full_adder_s a' b' cin' in 
+   let (sum,cout)    := (s2b sum, s2b cout) in
      a + b + cin = 2 * cout + sum.
 
-Theorem full_adder_b_high_level_verification : 
- ck_full_adder_ok full_adder_b.
+Theorem full_adder_s_high_level_verification : 
+ ck_full_adder_s_ok full_adder_s.
 Proof.
-  unfold ck_full_adder_ok.
+  unfold ck_full_adder_s_ok.
   destruct a, b, cin; reflexivity.
 Qed.
+
+
+
 
 (* rc_adder *)
 Fixpoint rem2 (n:nat) : bool :=
@@ -283,10 +299,11 @@ Definition lg1 (n : nat) : bool :=
   end.
 Definition ci := lg1.  (* carry part of number n. *)
 Definition si := rem2. (* sum part of number n.   *)
+Compute si 2. Compute ci 2.
 
 (* boolean版本的正确性证明 *)
-(* 进位的正确性 *)
-Theorem rc_adder_carry_red_b : 
+(* carry的正确性 *)
+Theorem rc_adder_b_carry_red : 
   forall (a b:bool) (xy:tpPairList_b) (c:bool),
   snd (rc_adder_b ((a,b)::xy) c) = 
   ci (a + b + (snd (rc_adder_b xy c))).
@@ -300,8 +317,8 @@ intro b; generalize (signal2bool s b); intro b0;
 destruct b0; reflexivity.
 Qed.
 
-(* 求和的正确性 *)
-Theorem rc_adder_sum_red_b :
+(* sum的正确性 *)
+Theorem rc_adder_b_sum_red :
   forall (a b:bool) (xy:tpPairList_b) (c:bool),
   fst (rc_adder_b ((a,b)::xy) c) = 
   si (a + b + snd (rc_adder_b xy c)) :: (fst (rc_adder_b xy c)).
@@ -316,7 +333,7 @@ Qed.
 
 (* Signal版本的正确性证明 *)
 (* 进位的正确性 *)
-Theorem rc_adder_carry_red_s : 
+Theorem rc_adder_s_carry_red : 
   forall (a b:Signal) (xy:tpPairList_s) (c:Signal),
   s2b (snd (rc_adder_s ((a,b)::xy) c)) = 
   ci ((s2b a) + (s2b b) + (s2b (snd (rc_adder_s xy c)))).
@@ -330,7 +347,7 @@ destruct (signal2bool s b0); reflexivity.
 Qed.
 
 (* 求和的正确性 *)
-Theorem rc_adder_sum_red_s : 
+Theorem rc_adder_s_sum_red : 
   forall (a b:Signal) (xy:tpPairList_s) (c:Signal),
   map s2b (fst (rc_adder_s ((a,b)::xy) c)) =
   (si ((s2b a) + (s2b b) + (s2b (snd (rc_adder_s xy c))))) 
@@ -344,11 +361,193 @@ destruct (signal2bool a b0);destruct (signal2bool b b0);
 destruct (signal2bool s b0);reflexivity.
 Qed.
 
+(* 补充证明 *)
+(* 
+   Signal => nat 分为两个步骤 :
+     1. s2b         : Signal => bool
+     2. b2n : bool   => nat
+
+   list Signal => nat 分为两个步骤：
+     1. slist2blist  : Signal list => bool list
+     2. blist2n : bool list   => nat
+*)
+(* 2^n *)
+Fixpoint sftl n : nat :=
+  match n with
+  | 0 => 1
+  | S n => let m := sftl n in 2*m
+  end.
+Fixpoint blist2n (nlist:(list bool)) : nat :=
+  match nlist with
+  | nil => 0
+  | hd :: tl => hd * (sftl (List.length tl)) + blist2n(tl)
+  end.
+Definition slist2n (p:list Signal) := blist2n (slist2blist p).
+Definition s2n (s:Signal) : nat := b2n (s2b s).
+
+(* bool版本 *)
+Lemma b2s2b : forall c : bool, s2b (b2s c) = c.
+Proof. destruct c; reflexivity. Qed.
+Lemma split_simpl : forall (a b:bool) (xy:tpPairList_b),
+  split ((a, b) :: xy) = (a::fst(split xy) , b::snd(split xy)).
+Proof. intros. letPairSimp. destruct (split xy). auto. Qed.
+Lemma blist2n_split : forall (a:bool) (b:list bool),
+  let n := List.length b in
+  blist2n (a::b) = (b2n a) * (sftl n) + (blist2n b).
+Proof. intros. simpl. unfold n. auto. Qed.
+Lemma rc_adder_b_split :forall (xy:tpPairList_b) (c:bool), 
+       rc_adder_b xy c = (fst(rc_adder_b xy c), snd(rc_adder_b xy c)).
+Proof. auto. Qed.
+Lemma cons_len : forall (A:Type) (a:A) (b:list A),
+  List.length (a::b) = List.length b + 1.
+Proof. simpl. lia. Qed.
+Lemma rc_adder_b_len : forall (xy:tpPairList_b) (c:bool),
+  List.length (fst (rc_adder_b xy c)) = List.length xy.
+Proof. intros. induction xy;induction c;auto;
+destruct a as (a1,a2); rewrite cons_len;
+rewrite <- IHxy; rewrite rc_adder_b_sum_red;
+rewrite cons_len; auto. Qed.
+Lemma sftl_simpl : forall n:nat, sftl (n+1) = sftl n + sftl n.
+Proof. intro. induction n;auto. simpl.
+do 2 rewrite <- plus_n_O. rewrite IHn. auto. Qed.
+
+Theorem rc_adder_b_correct : 
+  forall (xy:tpPairList_b) (c:bool),
+    let (sum,carry) := rc_adder_b xy c in
+    let (x,y) := list_split bool xy in
+    let (n,m) := (blist2n x, blist2n y) in 
+    let len   := List.length xy in
+      n+m+c = (blist2n sum) + carry * (sftl len).
+Proof.
+intros. induction xy. 
+simpl. rewrite b2s2b. lia.
+rewrite rc_adder_b_split. rewrite split_fst_snd.
+rewrite cons_len.
+destruct a as (a,b). autorewrite with base_red.
+(* 处理IHxy *)
+rewrite rc_adder_b_split in IHxy. rewrite split_fst_snd in IHxy.
+(* 调整等式左边以应用IHxy *)
+do 2 rewrite blist2n_split. rewrite rc_adder_b_sum_red. 
+rewrite rc_adder_b_carry_red. rewrite mapfst_len.
+rewrite mapsnd_len. do 2 rewrite <- Nat.add_assoc. 
+rewrite (Nat.add_comm (a*sftl (Datatypes.length xy)) (blist2n (mapfst bool xy) +
+ (b*sftl (Datatypes.length xy) + blist2n (mapsnd bool xy) + c))).
+rewrite <- (Nat.add_assoc (b * sftl (Datatypes.length xy)) (blist2n (mapsnd bool xy)) c).
+rewrite (Nat.add_comm (b*sftl (Datatypes.length xy)) (blist2n (mapsnd bool xy) + c)).
+do 2 rewrite Nat.add_assoc. rewrite IHxy.
+(* 分类讨论 *)
+rewrite blist2n_split. rewrite rc_adder_b_len.
+destruct a,b,(snd (rc_adder_b xy c));simpl;
+set (t:=Datatypes.length xy); try repeat rewrite <- plus_n_O;
+try rewrite sftl_simpl;try auto.
+symmetry. rewrite Nat.add_assoc.  
+do 2 f_equal. rewrite Nat.add_comm. f_equal.
+rewrite Nat.add_assoc. f_equal. rewrite Nat.add_assoc. f_equal.
+rewrite Nat.add_comm.  f_equal. rewrite Nat.add_assoc. f_equal.
+rewrite Nat.add_comm.  f_equal. rewrite Nat.add_comm. f_equal.
+Qed.
+
+
+(* Signal版本 *)
+(* 一些辅助引理 *)
+Lemma rc_adder_s_split : forall (xy:tpPairList_s) (c:Signal),
+  rc_adder_s xy c = (fst (rc_adder_s xy c), snd (rc_adder_s xy c)).
+Proof. intros. induction xy. auto.
+simpl. destruct a. rewrite IHxy. auto. Qed.
+Lemma rc_adder_s_len : forall (xy:tpPairList_s) (c:Signal),
+  List.length (fst (rc_adder_s xy c)) = List.length xy.
+Proof. intros. induction xy;simpl. auto. destruct a. 
+rewrite rc_adder_s_split. simpl. rewrite IHxy. auto. Qed.
+Lemma pair_len : forall a:tpPairList_b, 
+  Datatypes.length (bpairs2spairs a) = Datatypes.length a.
+Proof. intro. induction a. auto.
+simpl. f_equal. rewrite IHa. auto. Qed.
+Lemma si_red : forall a:bool, si a = a.
+Proof. destruct a;auto. Qed.
+
+Definition ck_rc_adder_s_ok (rc_adder : tpRcAdder_s) : Prop :=
+  forall (xy : tpPairList_b) (c : bool),
+    let (x,y)    := list_split bool xy in
+    let (n,m)    := (blist2n x, blist2n y) in 
+    let (xy',c') := (bpairs2spairs xy,b2s c) in
+    let (sum',carry') := rc_adder_s xy' c' in
+    let (sum,carry)   := (slist2blist sum', s2b carry') in
+    let len := List.length xy in
+      n+m+c = (blist2n sum) + carry * (sftl len).
+
+Theorem rc_adder_s_correct : 
+  ck_rc_adder_s_ok rc_adder_s.
+Proof.
+unfold ck_rc_adder_s_ok. intros. induction xy.
+- simpl. rewrite b2s2b. lia.
+- destruct a as (a1,a2). rewrite split_fst_snd.
+autorewrite with base_red. do 2 rewrite blist2n_split.
+rewrite Nat.add_assoc. rewrite mapfst_len. rewrite mapsnd_len.
+rewrite rc_adder_s_split.
+(* 处理IHxy *)
+rewrite rc_adder_s_split in IHxy. rewrite split_fst_snd in IHxy.
+(* 应用IHxy *)
+rewrite (Nat.add_comm (a1 * sftl (Datatypes.length xy))(blist2n (mapfst bool xy))).
+do 3 rewrite <- Nat.add_assoc. 
+rewrite (Nat.add_comm (a2 * sftl (Datatypes.length xy))(blist2n (mapsnd bool xy)+c)).
+rewrite (Nat.add_comm (a1 * sftl (Datatypes.length xy))(blist2n (mapsnd bool xy)+c+(a2 * sftl (Datatypes.length xy)))).
+do 3 rewrite Nat.add_assoc. rewrite IHxy.
+(* right *)
+set(t:=Datatypes.length xy). unfold slist2blist.
+assert(bpairs2spairs ((a1, a2) :: xy) = (b2s a1,b2s a2)::bpairs2spairs xy). simpl. auto.
+rewrite H;clear H. rewrite rc_adder_s_sum_red. rewrite rc_adder_s_carry_red.
+do 2 rewrite b2s2b.
+(* 分类讨论 *)
+destruct a1,a2,c;simpl;try repeat rewrite <- plus_n_O.
++ rewrite Nat.add_assoc. f_equal. f_equal. 
+rewrite Nat.add_comm. f_equal. rewrite map_length. rewrite rc_adder_s_len. 
+rewrite pair_len. f_equal. rewrite si_red. auto.
++ rewrite Nat.add_assoc. f_equal. f_equal. 
+rewrite Nat.add_comm. f_equal. rewrite map_length. rewrite rc_adder_s_len. 
+rewrite pair_len. f_equal. rewrite si_red. auto.
++ destruct (s2b (snd (rc_adder_s (bpairs2spairs xy) Bit1)));simpl.
+do 3 rewrite Nat.add_assoc. do 2 rewrite <- plus_n_O. f_equal.
+do 3 rewrite <- plus_n_O. rewrite Nat.add_comm. f_equal.
+rewrite map_length. rewrite rc_adder_s_len. rewrite pair_len.
+unfold t. auto.
++ destruct (s2b (snd (rc_adder_s (bpairs2spairs xy) Bit0)));simpl.
+do 3 rewrite Nat.add_assoc. do 2 rewrite <- plus_n_O. f_equal.
+do 3 rewrite <- plus_n_O. rewrite Nat.add_comm. f_equal.
+rewrite map_length. rewrite rc_adder_s_len. rewrite pair_len.
+unfold t. auto.
++ destruct (s2b (snd (rc_adder_s (bpairs2spairs xy) Bit1)));simpl.
+do 3 rewrite Nat.add_assoc. do 2 rewrite <- plus_n_O. f_equal.
+do 3 rewrite <- plus_n_O. rewrite Nat.add_comm. f_equal.
+rewrite map_length. rewrite rc_adder_s_len. rewrite pair_len.
+unfold t. auto.
++ destruct (s2b (snd (rc_adder_s (bpairs2spairs xy) Bit0)));simpl.
+do 3 rewrite Nat.add_assoc. do 2 rewrite <- plus_n_O. f_equal.
+do 3 rewrite <- plus_n_O. rewrite Nat.add_comm. f_equal.
+rewrite map_length. rewrite rc_adder_s_len. rewrite pair_len.
+unfold t. auto.
++ rewrite map_length. rewrite rc_adder_s_len. rewrite pair_len.
+set(m:=blist2n (map s2b (fst (rc_adder_s (bpairs2spairs xy) Bit1)))).
+set(n:=s2b (snd (rc_adder_s (bpairs2spairs xy) Bit1))).
+fold t. rewrite <- Nat.add_assoc. rewrite Nat.add_comm.
+rewrite (Nat.add_comm m (ci n * (sftl t + sftl t))).
+rewrite Nat.add_assoc. f_equal. destruct n;simpl;easy.
++ rewrite map_length. rewrite rc_adder_s_len. rewrite pair_len.
+set(m:=blist2n (map s2b (fst (rc_adder_s (bpairs2spairs xy) Bit0)))).
+set(n:=s2b (snd (rc_adder_s (bpairs2spairs xy) Bit0))).
+fold t. rewrite <- Nat.add_assoc. rewrite Nat.add_comm.
+rewrite (Nat.add_comm m (ci n * (sftl t + sftl t))).
+rewrite Nat.add_assoc. f_equal. destruct n;simpl;easy.
+Qed.
+
+
+
+
+
 
 
 
 (* ================================================================================= *)
-(** ** generate verilog code *)  
+(** ** generate verilog code *)
 (* 这个模块目前还有问题，生成代码的时候只处理了Bitv的情况，后面还需要修改 *)
 Fixpoint gv (s:Signal) : string :=
  match s with
@@ -394,16 +593,24 @@ Definition gv_full_adder (f:tpFullAdder_s) (x y z: Signal) : string :=
                                                
          endmodule  ".
 
+(* 1. gv_half_adder : Signal  -> Verilog
+   2. gs_half_adder : Verilog -> Signal
+   给一个加法器half_adder: 
+   correct_verilog gs_half_adder (gv_half_adder half_adder) = half_adder  *)
+(*
+Compute gv_half_adder half_adder_s a b.
+     = " module half_adder(
+             input   a,b,
+             output  sum,cout
+         );
+             assign sum = (a)^(b);
+             assign cout = (a)&(b);
+         endmodule  "
+*)
+
 
 (* 生成行波进位加法器的verilog代码 *)
 (* sum : list Signal => list string *)
-Definition Signallist2stringlist (Signal_list:tpList_s) : list string :=
-  List.map gv Signal_list.
-(* 提取输入中所有变量的名字 *)
-Definition input_conv (ab:tpPairList_s) : string :=
-  String.concat "," (List.map (fun '(a, b) => gv a ++ "," ++ gv b) ab).
-Compute input_conv [(Bitv"a1",Bitv"b1");(Bitv"a2",Bitv"b2")].
-
 Definition divmod (x y : nat) : nat * nat := (x / y, x mod y).
 Definition natToDigit (n : nat) : ascii :=
   match n with
@@ -433,18 +640,30 @@ Definition writeNat (n : nat) : string :=
 Definition mk_fresh (v:string) (cnt:nat) : string :=
    v ++ (writeNat cnt).
 
+Definition Signallist2stringlist (Signal_list:tpList_s) : list string :=
+  List.map gv Signal_list.
+(* 提取输入中所有变量的名字 *)
+Definition input_conv (ab:tpPairList_s) : string :=
+  String.concat "," (List.map (fun '(a, b) => gv a ++ "," ++ gv b) ab).
+
+Compute input_conv [(Bitv"a1",Bitv"b1");(Bitv"a2",Bitv"b2")].
+(* "a1,b1,a2,b2" *)
+
+
 Fixpoint sum_split (sum:list string) (n:nat) {struct n}: string :=
   let sum_rev := rev sum in
   match n with
   | 0 => ""
   | S m => (sum_split sum m) ++ 
-           (mk_fresh "assign sum[" (n-1)) ++ "]" ++ " = " ++ 
+           (mk_fresh "assign sum" (n-1)) ++ " = " ++ 
            (nth (n-1) sum_rev "unknown") ++ ";" ++ "
         " 
   end.
-(* Definition c := Bitv "c".
-Definition l := [(Bitv "a1", Bitv "b1"); (Bitv "a2", Bitv "b2")].
-Compute sum_split (Signallist2stringlist (fst (rc_adder_s l c))) 2. *)
+Definition c := Bitv "c".
+Definition l := [(Bitv "a1", Bitv "b1"); (Bitv "a0", Bitv "b0")].
+Compute sum_split (Signallist2stringlist (fst (rc_adder_s l c))) 2.
+(* assign sum[0] = ((a2)^(b2))^(c);
+   assign sum[1] = ((a1)^(b1))^(((a2)&(b2))|(((a2)^(b2))&(c))); *)
 
 Definition gv_rc_adder (f:tpRcAdder_s) (ab:tpPairList_s) (c: Signal) : string :=
   let (sum, carry) := f ab c in  
@@ -454,7 +673,7 @@ Definition gv_rc_adder (f:tpRcAdder_s) (ab:tpPairList_s) (c: Signal) : string :=
   let sum_list := String.concat "," (List.map gv sum) in
 " module rc_adder(                                
              input " ++ ab_list ++ "," ++ c1 ++ ",
-             output " ++ "[" ++ (mk_fresh "" (n-1)) ++ ":" ++ (mk_fresh "" 0) ++"] sum ,cout                       
+             output " ++ (mk_fresh "sum" (n-1)) ++ "," ++ (mk_fresh " sum" 0) ++", cout
          );" ++ "
         "++ "
         " ++ (sum_split (Signallist2stringlist sum) n) ++
@@ -465,17 +684,31 @@ Definition gv_rc_adder (f:tpRcAdder_s) (ab:tpPairList_s) (c: Signal) : string :=
 (* test *)
 Definition a := Bitv "a".
 Definition b := Bitv "b".
-Definition c := Bitv "c".
 Definition l4 := [(Bitv "a1", Bitv "b1"); (Bitv "a2", Bitv "b2");
                   (Bitv "a3", Bitv "b3"); (Bitv "a4", Bitv "b4")].
-Definition l := [(Bitv "a1", Bitv "b1"); (Bitv "a2", Bitv "b2")].
+
+
+(* Definition l := [(Bitv "a1", Bitv "b1"); (Bitv "a0", Bitv "b0")]. *)
 Compute gv_rc_adder rc_adder_s l c.
 
 Compute gv_half_adder half_adder_s a b.
+(*
+     = " module half_adder(
+             input   a,b,
+             output  sum,cout                  
+         );                                    
+                                               
+             assign sum = (a)^(b);  
+             assign cout = (a)&(b);
+                                               
+         endmodule  "
+*)
 Compute gv_full_adder full_adder_s a b c.
-
-
 Compute gv_rc_adder rc_adder_s l4 c.
+
+
+
+
 
 
 
@@ -487,8 +720,8 @@ Compute gv_rc_adder rc_adder_s l4 c.
 Inductive tpImmed :=
   LowV | HighV | SigVar : string -> tpImmed.
 Inductive tpGateNo :=
-   NotGate | AndGate | OrGate 
-  | XorGate | EqGate | NorGate | NandGate.
+  | NotGate | AndGate | OrGate 
+  | XorGate | NorGate | NandGate.
 
 (* type of netlist is a 4 element tuple: v := (op v1 v2) *)
 Definition tpGateAssign2 := 
@@ -591,10 +824,6 @@ Compute mk_rcadder_netlist [(a,b)] c.
 Compute mk_netlist2 (full_adder_s a b c).
 (* 2-bit，两个全加器的串联 *)
 Compute mk_rcadder_netlist [(Bitv"a1",Bitv"b1");(Bitv"a2",Bitv"b2")] c.
-
-
-
-
 (* 1-bit，相当于一个全加器 *)
 Compute mk_rcadder_netlist [(a,b)] c.
 Compute mk_netlist2 (full_adder_s a b c). 
@@ -605,8 +834,12 @@ Compute mk_rcadder_netlist [(Bitv"a1",Bitv"b1");(Bitv"a2",Bitv"b2")] c.
 
 
 
+
+
+
 (* ================================================================================= *)
 (** ** netlist to Signal *)
+(* 未完成 *)
 Definition immed2signal (i:tpImmed) : Signal := 
   match i with
   | LowV => Bit0
@@ -614,21 +847,35 @@ Definition immed2signal (i:tpImmed) : Signal :=
   | SigVar v => Bitv v
  end.
 
-Fixpoint n2s (ne:list tpNetEle) : Signal :=
-  match ne with
-  | ImmedAss (v,i)::tl => Letb v (immed2signal i)  (n2s tl) 
- | GateAss1 (v, (NotGate,i))::tl => 
-    Letb v (Not1(immed2signal i)) (n2s tl)
- | GateAss2 (v, (XorGate,i,j))::tl => 
-    Letb v (Xor2 (immed2signal i) (immed2signal j))  (n2s tl)
- | GateAss2 (v, (AndGate,i,j))::tl => 
-    Letb v (And2 (immed2signal i) (immed2signal j))  (n2s tl)
- | GateAss2 (v, (OrGate,i,j))::tl => 
-    Letb v (Or2 (immed2signal i) (immed2signal j))  (n2s tl)
- | _ => Bit0
- end.
-Compute (List.map n2s ( mk_netlist2 (full_adder_s a b c))).
+(* (* 把网表中的每个结构转成Signal *) 
+Definition tpNetEle2Signal (netEle:tpNetEle) : Signal :=
+  match netEle with
+  (* 信号直接赋值给string *)
+  | ImmedAss (v,i) => Bitv v (immed2signal i)
+  (* 信号经过单变量门操作后赋值给string *)
+  | GateAss1 (v, (gate,i)) => Letb v (Not1 (immed2signal i))
+  | GateAss2 (v, (gate,i,j)) =>
+      match gate with
+      | AndGate  => Letb v (And2  (immed2signal i)) (immed2signal j)
+      | OrGate   => Letb v (Or2   (immed2signal i) (immed2signal j))
+      | XorGate  => Letb v (Xor2  (immed2signal i) (immed2signal j))
+      | NorGate  => Letb v (Nor2  (immed2signal i) (immed2signal j))
+      | NandGate => Letb v (Nand2 (immed2signal i) (immed2signal j))
+      | NotGate  => Bit0
+      end
+  end.
+
+
+(* 全加器和半加器的网表转Signal *)
+Definition n2s (net:list tpNetlist) : list Signal :=
+  List.map n2s_aux net.
+
+Compute mk_netlist2 (full_adder_s a b c).
+Compute n2s (mk_netlist2 (full_adder_s a b c)). (* 所有的都是Letb *)
 Compute (List.map gv (List.map n2s ( mk_netlist2 (full_adder_s a b c)))).
+ *)
+
+
 
 
 
@@ -659,7 +906,6 @@ Fixpoint netlist_to_verilog_aux (netlist : tpNetlist) : string :=
         | AndGate => "&"
         | OrGate => "|"
         | XorGate => "^"
-        | EqGate => "=="
         | NorGate => "~|"
         | NandGate => "~&"
         end in
@@ -674,7 +920,6 @@ Fixpoint netlist_to_verilog_aux (netlist : tpNetlist) : string :=
         | AndGate => "&"
         | OrGate => "|"
         | XorGate => "^"
-        | EqGate => "=="
         | NorGate => "~|"
         | NandGate => "~&"
         end in
@@ -816,8 +1061,6 @@ Definition eval_netlist_rc (netlist:sum_carry) : list (string * bool) :=
 Compute eval_netlist2 (mk_netlist2 (full_adder_s (Bitv "true") (Bitv "false") (Bitv "true"))).
 (* 仿真结果 : [("Xor2L0", false); ("Or2L0", true)]
    第一个表示求出来的和，为false，第二个表示进位，为true     *)
-
-
 Compute eval_netlist_rc (mk_rcadder_netlist 
      [(Bitv"true",Bitv"true");(Bitv"true",Bitv"true")] 
       (Bitv "false")).
