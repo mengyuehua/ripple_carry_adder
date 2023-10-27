@@ -21,7 +21,7 @@ Inductive Signal : Set :=
   | Nand2 : Signal -> Signal -> Signal
   | Nor2  : Signal -> Signal -> Signal
   | Not1  : Signal -> Signal
-  | Letb  : string -> Signal -> Signal -> Signal  (* 去掉了一个Signal *)
+  | Letb  : string -> Signal -> Signal -> Signal
 with Signal_Pair : Set :=
   | Spair : Signal -> Signal -> Signal_Pair
   | Letb2 : string -> Signal -> Signal_Pair -> Signal_Pair.
@@ -48,9 +48,6 @@ Fixpoint signal2bool (s:Signal) (env : string -> bool) {struct s} : bool :=
    | Nand2 r1 r2 => nandb (s2b r1) (s2b r2)
    | Nor2  r1 r2 => negb (orb  (s2b r1) (s2b r2))
    | Bitv v => env v
-(*    | Letb v r => 
-      let v1 := s2b r in *)
-      
    | Letb v e1 e2 => 
        let v1 := s2b e1 in
        let env1 x := if eqb x v then v1 else env x in
@@ -105,8 +102,6 @@ Infix "!&" := nandb  (at level 40, left associativity)  : bool_scope.
 Definition half_adder_s (a b : Signal) : Signal2 := 
  pair (a (+) b) (a && b).
 Compute half_adder_s (Bitv "a") (Bitv "b").
-(* adder -> Signal  直接Compute *)
-(* (Bitv "a" (+) Bitv "b", Bitv "a" && Bitv "b") *)
 
 Definition full_adder_s (a b cin : Signal) : Signal2 :=
   let (s1,c1) := half_adder_s a b in
@@ -362,15 +357,6 @@ destruct (signal2bool s b0);reflexivity.
 Qed.
 
 (* 补充证明 *)
-(* 
-   Signal => nat 分为两个步骤 :
-     1. s2b         : Signal => bool
-     2. b2n : bool   => nat
-
-   list Signal => nat 分为两个步骤：
-     1. slist2blist  : Signal list => bool list
-     2. blist2n : bool list   => nat
-*)
 (* 2^n *)
 Fixpoint sftl n : nat :=
   match n with
