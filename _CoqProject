@@ -10,7 +10,6 @@ coqadder.v
 listext.v
 metaind.v
 rc_adder.v
-rc_adder_correct.v
 simple.v
 tacdef.v
 v816.v
